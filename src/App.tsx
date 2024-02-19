@@ -29,11 +29,36 @@ class CustomShaderMaterial extends THREE.ShaderMaterial {
 
 extend({ CustomShaderMaterial });
 
+const material = new THREE.MeshStandardMaterial({
+  color: 0x555555,
+  metalness: 0.5,
+  roughness: 0.5,
+});
+
+material.onBeforeCompile = (shader) => {
+  // Add a uniform for your audio data or any other dynamic value
+  shader.uniforms.audioAmplitude = { value: 0.0 };
+
+  // Inject custom vertex shader code
+  // This example simply modifies the vertex position based on the audio amplitude
+  const vertexShaderModification = vertexShader;
+
+  shader.vertexShader = shader.vertexShader.replace(
+    "#include <begin_vertex>",
+    vertexShaderModification + "vec3 transformed = modPosition;"
+  );
+
+  // Save the modified shader for later use
+  material.userData.shader = shader;
+};
+
 const Sphere: React.FC<SphereProps> = ({ audioRef }) => {
   const mesh = useRef<THREE.Mesh>(null);
   const analyserRef = useRef<AnalyserNode>();
-  const dataArrayRef = useRef<Float32Array>();
+  const dataArrayRef = useRef<Uint8Array>();
   const textureRef = useRef<THREE.DataTexture>();
+  const smoothedValueRef = useRef(0); // Initialize smoothed value
+  const alpha = 0.5; // Smoothing factor - adjust as needed
 
   useEffect(() => {
     if (audioRef.current) {
@@ -43,7 +68,7 @@ const Sphere: React.FC<SphereProps> = ({ audioRef }) => {
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 256;
       const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Float32Array(bufferLength);
+      const dataArray = new Uint8Array(bufferLength);
 
       const texture = new THREE.DataTexture(
         dataArray,
@@ -76,7 +101,7 @@ const Sphere: React.FC<SphereProps> = ({ audioRef }) => {
       dataArrayRef.current &&
       textureRef.current
     ) {
-      analyserRef.current.getFloatFrequencyData(dataArrayRef.current);
+      analyserRef.current.getByteFrequencyData(dataArrayRef.current);
 
       textureRef.current.image.data.set(dataArrayRef.current);
       textureRef.current.needsUpdate = true;
@@ -88,17 +113,25 @@ const Sphere: React.FC<SphereProps> = ({ audioRef }) => {
 
       // console.log(dataArrayRef.current[44]);
 
+      const data = dataArrayRef.current;
+      const sum = data.reduce((acc, value) => acc + value, 0);
+      const average = sum / data.length;
+
+      smoothedValueRef.current =
+        smoothedValueRef.current * (1 - alpha) +
+        dataArrayRef.current[0] * alpha;
+
       const material = mesh.current.material as CustomShaderMaterial;
       material.uniforms.audioTexture.value = dataArrayRef.current;
       material.uniforms.time.value = state.clock.getElapsedTime();
-      material.uniforms.test.value = dataArrayRef.current[0];
+      material.uniforms.test.value = smoothedValueRef.current;
       material.uniforms.resolution.value.set(
         window.innerWidth,
         window.innerHeight
       );
 
-      mesh.current.rotation.x = state.clock.getElapsedTime() / 40;
-      mesh.current.rotation.y = state.clock.getElapsedTime() / 70;
+      mesh.current.rotation.x = state.clock.getElapsedTime() / 10;
+      mesh.current.rotation.y = state.clock.getElapsedTime() / 13;
     }
   });
 
@@ -111,7 +144,7 @@ const Sphere: React.FC<SphereProps> = ({ audioRef }) => {
       ref={mesh}
       // uniforms-resolution-value={[window.innerWidth, window.innerHeight]}
     >
-      <sphereGeometry args={[1, 64, 64]} attach="geometry" />
+      <sphereGeometry args={[1, 32, 32]} attach="geometry" />
       <customShaderMaterial wireframe={true} />
     </mesh>
   );
@@ -133,6 +166,7 @@ function App() {
       >
         <color attach="background" args={["#000000"]} />
         <fog attach="fog" args={["#d0d0d0", 5, 10]} />
+
         <ambientLight intensity={2} />
         <directionalLight position={[10, 10, 0]} intensity={1.5} />
         <directionalLight position={[-10, 10, 5]} intensity={1} />
